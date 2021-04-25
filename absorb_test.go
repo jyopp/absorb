@@ -12,8 +12,9 @@ type testSource struct {
 }
 
 // testSource implements absorb.Absorbable
+// It emits its keys in the tag namespace "test"
 func (ts testSource) Emit(into absorb.Absorber) error {
-	into.Open("test", ts.i, "One", "Two")
+	into.Open("test", ts.i, "Name", "Aliased")
 	defer into.Close()
 
 	for i := 0; i < ts.i; i++ {
@@ -23,8 +24,8 @@ func (ts testSource) Emit(into absorb.Absorber) error {
 }
 
 type TestDst struct {
-	One string
-	Two int
+	Name   string
+	Actual int `test:"Aliased"`
 }
 
 func TestStructPointer(t *testing.T) {
@@ -34,7 +35,7 @@ func TestStructPointer(t *testing.T) {
 	if err := absorb.Absorb(&dst, src); err != nil {
 		t.Fatal(err)
 	}
-	expect := TestDst{One: "test", Two: 1}
+	expect := TestDst{Name: "test", Actual: 1}
 	if dst != expect {
 		t.Fatalf("Expected %+v, got %+v", expect, dst)
 	}
@@ -51,7 +52,7 @@ func TestStructSlice(t *testing.T) {
 		t.Fatalf("Expected %d structs, got %d", src.i, len(dst))
 	}
 	for idx := range dst {
-		expect := TestDst{One: "test", Two: idx + 1}
+		expect := TestDst{Name: "test", Actual: idx + 1}
 		if dst[idx] != expect {
 			t.Fatalf("Expected %+v, got %+v", expect, dst[idx])
 		}
@@ -71,7 +72,7 @@ func TestStructChannel(t *testing.T) {
 	idx := 0
 	for received := range dst {
 		idx++
-		expect := TestDst{One: "test", Two: idx}
+		expect := TestDst{Name: "test", Actual: idx}
 
 		if received != expect {
 			t.Fatalf("Expected %+v, got %+v", expect, received)
@@ -87,8 +88,8 @@ func TestMap(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Logf("Dst: %+v\n", dst)
-	if expected := 1; dst["Two"].(int) != expected {
-		t.Fatal("dst.Two did not contain final value", "got", dst["Two"], "expected", expected)
+	if expected := 1; dst["Aliased"].(int) != expected {
+		t.Fatal("dst[Aliased] did not contain final value", "got", dst["Aliased"], "expected", expected)
 	}
 }
 

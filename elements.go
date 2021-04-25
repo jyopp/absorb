@@ -42,11 +42,22 @@ func newBuilder(elemTyp reflect.Type, tag string, keys []string) *elementBuilder
 		Keys: keys,
 	}
 
-	if a.Type.Kind() == reflect.Struct {
-		// TODO: Flip inner & outer loops, iterate fields & check struct tags.
+	if elemTyp.Kind() == reflect.Struct {
+		tagFields := make(map[string]reflect.StructField)
+		if tag != "" {
+			for i := 0; i < elemTyp.NumField(); i++ {
+				field := elemTyp.Field(i)
+				if tagVal := field.Tag.Get(tag); tagVal != "" {
+					tagFields[tagVal] = field
+				}
+			}
+		}
+
 		fields := make([]reflect.StructField, len(keys))
 		for idx, key := range keys {
-			if field, ok := a.Type.FieldByName(key); ok {
+			if tagged, ok := tagFields[key]; ok {
+				fields[idx] = tagged
+			} else if field, ok := a.Type.FieldByName(key); ok {
 				fields[idx] = field
 			}
 		}
