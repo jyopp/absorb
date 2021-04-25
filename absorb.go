@@ -29,6 +29,16 @@ type Absorber interface {
 	Close()
 }
 
+/*
+	Absorb absorbs all source values into a new Absorber for dst.
+	Equivalent to src.Emit(absorb.New(dst)).
+
+	Examples:
+	  var mySlice []structType
+	  err := absorb.Absorb(&mySlice, dataSource)
+	  structChan := make(chan structType)
+	  err = absorb.Absorb(structChan, rowReader)
+*/
 func Absorb(dst interface{}, src Absorbable) error {
 	return src.Emit(New(dst))
 }
@@ -93,7 +103,11 @@ func (a *absorberImpl) Open(tag string, count int, keys ...string) {
 	case reflect.Slice:
 		elemTyp = setVal.Type().Elem()
 		// Replace setVal with a new slice with reserved capacity.
-		setVal.Set(reflect.MakeSlice(setVal.Type(), 0, count))
+		cap := count
+		if cap < 0 {
+			cap = 25
+		}
+		setVal.Set(reflect.MakeSlice(setVal.Type(), 0, cap))
 	case reflect.Chan:
 		elemTyp = setVal.Type().Elem()
 	default:
