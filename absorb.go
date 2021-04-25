@@ -6,65 +6,70 @@ import (
 
 type Values []interface{}
 
-type Countable interface {
-	Count() int
-}
-
-// Absorbable defines an iterable interface where Keys are retrieved once, and
-// values are iterated repeatedly.
+// Absorbable defines the interface for types that may fill Absorbers with values.
 type Absorbable interface {
-	// Keys must return the ordered source keys for absorption.
-	// If Keys returns nil, the zeroth value in NextValues() will be absorbed directly.
-	Keys() []string
-	// Next must return the constituent values of the next absorbable type.
-	// When no absorbable values remain, NextValues must return (nil, nil) to end iteration.
+	// Emit places the entire contents of the receiver into the provided Absorber.
 	//
-	// Values must be returned in the same order as Keys, or if Keys is nil,
-	// the zeroth value will be absorbed directly.
-	Next() (Values, error)
+	// Implementations must Open the Absorber and call Absorb for each value.
+	Emit(into Absorber) error
 }
 
-// Copy copies values from the given Absorbable into dst.
-// If tag is nonempty, dst must be a struct, chan struct, or slice of struct.
-// The given tag is used to match Absorbable Pairs to the output object.
-// Returns the first error reported by src.
-// Panics if the pairs produced by src cannot be fully mapped to dst.
-func Copy(dst interface{}, tag string, src Absorbable) error {
-	outVal := reflect.ValueOf(dst)
-	// To be assignable, dstType must be indirect (have a settable element)
-	if !isIndirect(outVal.Type()) || !outVal.Elem().CanSet() {
-		return &reflect.ValueError{
-			Method: "Set",
-			Kind:   outVal.Kind(),
-		}
+type Absorber interface {
+	// Open configures the Absorber to accept elements using the given set of keys.
+	// The given tagname (such as "mydb") is preferred when mapping keys to struct fields.
+	// Count is a hint about the number of items this Absorber can produce. If the number
+	// of items is unknown, pass -1.
+	//
+	// Returns the maximum number of times Absorb may be called, which is always greater than zero.
+	// For channel and slice types, returns INT_MAX. For struct and map pointers, returns 1.
+	// For array pointers, a fixed number is returned; Absorb panics if an array overflows.
+	Open(keys []string, tag string, count int) int
+	// Absorb creates an output element from the given values and adds it to the output.
+	//
+	// If the output type is a channel, this method may block.
+	// If the output type is array (not slice), panics on overflow.
+	Absorb(values []interface{})
+	// Close releases internal resources and assigns the output when relevant.
+	Close()
+}
+
+// Create a new Absorber that writes elements of the corresponding type into dst.
+func New(dst interface{}) Absorber {
+	return &absorberImpl{
+		dst: dst,
 	}
+}
 
-	keys := src.Keys()
-	var count int
-	if countable, ok := src.(Countable); ok {
-		count = countable.Count()
-	} else {
-		count = -1
-	}
+func Absorb(dst interface{}, src Absorbable) error {
+	return src.Emit(New(dst))
+}
 
-	absorber := getAbsorber(outVal.Type(), "", keys)
+type absorberImpl struct {
+	dst          interface{}
+	elemAbsorber *absorber
+}
 
-	print("Count", count)
+func (a *absorberImpl) Open(keys []string, tag string, count int) int {
+	dstTyp := reflect.TypeOf(a.dst)
+	elemTyp := elementType(dstTyp)
+	a.elemAbsorber = getAbsorber(elemTyp, tag, keys)
 
-	vals, err := src.Next()
-	for ; vals != nil; vals, err = src.Next() {
-		elem := absorber.element(vals)
-		println(elem.String())
-		outVal.Elem().Set(elem)
-	}
-	if err != nil {
-		return err
-	}
-	// If count is zero, try to return null else return an error.
-	// If count is > 1 and result is not a slice or channel, return an error.
+	// TODO: Recursively inspect dst's type to determine real count to return.
+	return count
+}
 
-	// Find outType, the underlying type of dst
-	// Get or build a cached mapping that can assign keys to outType
+func (a *absorberImpl) Absorb(values []interface{}) {
+	elem := a.elemAbsorber.element(values)
+	a.accept(elem)
+}
 
-	return nil
+func (a *absorberImpl) accept(elem reflect.Value) {
+	// Actually append the absorbed value to the output.
+	// TODO: Support all the crazy stuff. This only works with map & struct pointers.
+	reflect.ValueOf(a.dst).Elem().Set(elem)
+}
+
+func (a *absorberImpl) Close() {
+	// Not strictly necessary, but the Open/Close pattern is clear and useful.
+	a.elemAbsorber = nil
 }

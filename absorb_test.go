@@ -8,17 +8,15 @@ type testSource struct {
 	i int
 }
 
-func (ts *testSource) Keys() []string {
-	return []string{"One", "Two"}
-}
+// testSource implements Absorbable
+func (ts testSource) Emit(into Absorber) error {
+	count := into.Open([]string{"One", "Two"}, "test", ts.i)
+	defer into.Close()
 
-func (ts *testSource) Next() (Values, error) {
-	if ts.i < 5 {
-		ts.i++
-		return Values{"test", ts.i}, nil
-	} else {
-		return nil, nil
+	for i := 0; i < count; i++ {
+		into.Absorb(Values{"test", i + 1})
 	}
+	return nil
 }
 
 type TestDst struct {
@@ -27,10 +25,10 @@ type TestDst struct {
 }
 
 func TestPointerToStruct(t *testing.T) {
-	var src testSource
+	src := testSource{i: 5}
 	var dst TestDst
 
-	if err := Copy(&dst, "", &src); err != nil {
+	if err := Absorb(&dst, src); err != nil {
 		t.Fatal(err)
 	}
 	t.Logf("Dst: %+v\n", dst)
@@ -40,14 +38,14 @@ func TestPointerToStruct(t *testing.T) {
 }
 
 func TestMap(t *testing.T) {
-	var src testSource
+	src := testSource{i: 1}
 	var dst map[string]interface{}
 
-	if err := Copy(&dst, "", &src); err != nil {
+	if err := Absorb(&dst, src); err != nil {
 		t.Fatal(err)
 	}
 	t.Logf("Dst: %+v\n", dst)
-	if expected := 5; dst["Two"].(int) != expected {
+	if expected := 1; dst["Two"].(int) != expected {
 		t.Fatal("dst.Two did not contain final value", "got", dst["Two"], "expected", expected)
 	}
 }

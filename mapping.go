@@ -7,9 +7,8 @@ import (
 )
 
 type absorber struct {
-	Type reflect.Type
 	Elem reflect.Type
-	// The field indexes corresponding to the keys to be used
+	// Keys contains the array of keys, used to get key names for map[string] types.
 	Keys []string
 	// Field indexes are a *set* of integer indices used to reach a struct field.
 	Fields []reflect.StructField
@@ -25,13 +24,13 @@ func getAbsorbersForType(t reflect.Type) *sync.Map {
 	return i.(*sync.Map)
 }
 
-func getAbsorber(dstType reflect.Type, tag string, keys []string) *absorber {
-	absorbers := getAbsorbersForType(dstType)
+func getAbsorber(elemTyp reflect.Type, tag string, keys []string) *absorber {
+	absorbers := getAbsorbersForType(elemTyp)
 
 	compoundKey := tag + ":" + strings.Join(keys, "+")
 	i, ok := absorbers.Load(compoundKey)
 	if !ok {
-		toPut := buildAbsorber(dstType, keys)
+		toPut := buildAbsorber(elemTyp, tag, keys)
 		i, _ = absorbers.LoadOrStore(compoundKey, toPut)
 	}
 	return i.(*absorber)
@@ -49,17 +48,16 @@ func isIndirect(t reflect.Type) bool {
 	}
 }
 
-func directType(t reflect.Type) reflect.Type {
+func elementType(t reflect.Type) reflect.Type {
 	for isIndirect(t) {
 		t = t.Elem()
 	}
 	return t
 }
 
-func buildAbsorber(dstType reflect.Type, keys []string) *absorber {
+func buildAbsorber(elemTyp reflect.Type, tag string, keys []string) *absorber {
 	a := &absorber{
-		Type: dstType,
-		Elem: directType(dstType),
+		Elem: elemTyp,
 		Keys: keys,
 	}
 
