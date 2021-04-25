@@ -18,10 +18,8 @@ type Absorber interface {
 	// Count is a hint about the number of items this Absorber can produce. If the number
 	// of items is unknown, pass -1.
 	//
-	// Returns the maximum number of times Absorb may be called, which is always greater than zero.
-	// For channel and slice types, returns INT_MAX. For struct and map pointers, returns 1.
-	// For array pointers, a fixed number is returned; Absorb panics if an array overflows.
-	Open(tag string, count int, keys ...string) int
+	// Panics if count is greater than the absorber's maximum size.
+	Open(tag string, count int, keys ...string)
 	// Absorb creates an output element from the given values and adds it to the output.
 	//
 	// If the output type is a channel, this method may block.
@@ -31,43 +29,110 @@ type Absorber interface {
 	Close()
 }
 
-// Create a new Absorber that writes elements of the corresponding type into dst.
-func New(dst interface{}) Absorber {
-	return &absorberImpl{
-		dst: dst,
-	}
-}
-
 func Absorb(dst interface{}, src Absorbable) error {
 	return src.Emit(New(dst))
 }
 
-type absorberImpl struct {
-	dst          interface{}
-	elemAbsorber *absorber
+// Create a new Absorber that writes elements of the corresponding type into dst.
+// Panics if dst is not an assignable reference or a channel.
+func New(dst interface{}) Absorber {
+	// Consider the types:
+	// DstVal           ContainerVal   Elem
+	// *[]struct        []struct       struct
+	// chan struct      <---           struct
+	// *struct          <---           struct
+	// *int             <---           int
+	// *[10]map[s]i     [10]map[s]i    map[s]i
+
+	// Known Issues:
+	// *[]T expects one T per loop iteration; Absorb(T1, T2, T3) will panic.
+	// The best workaround is to not use absorb for single-valued iteration of this type.
+	// If absorb is required, create an Absorber that just stores the arguments to Absorb().
+
+	dstVal := reflect.ValueOf(dst)
+	var setVal reflect.Value
+
+	switch dstVal.Kind() {
+	case reflect.Ptr:
+		// The default case; We'll set dstVal.Elem() when accepting values.
+		setVal = dstVal.Elem()
+	case reflect.Chan:
+		if dstVal.Type().ChanDir() == reflect.RecvDir {
+			panic("cannot absorb into receive-only channel of type " + dstVal.Type().String())
+		}
+		// It is correct to pass Channels directly; Skip a level of indirection.
+		setVal = dstVal
+	default:
+		panic("cannot absorb into (non-ptr, non-chan) " + dstVal.Type().String())
+	}
+
+	return &absorberImpl{
+		dst:    dst,
+		setVal: setVal,
+	}
 }
 
-func (a *absorberImpl) Open(tag string, count int, keys ...string) int {
-	dstTyp := reflect.TypeOf(a.dst)
-	elemTyp := elementType(dstTyp)
-	a.elemAbsorber = getAbsorber(elemTyp, tag, keys)
+type absorberImpl struct {
+	dst     interface{}
+	idx     int
+	setVal  reflect.Value
+	builder *elementBuilder
+}
 
-	// TODO: Recursively inspect dst's type to determine real count to return.
-	return count
+func (a *absorberImpl) Open(tag string, count int, keys ...string) {
+	setVal := a.setVal
+
+	// Examine setVal to get element type and, when appropriate, allocate a container.
+	var elemTyp reflect.Type
+	switch setVal.Kind() {
+	case reflect.Array:
+		if count > setVal.Type().Len() {
+			panic("cannot absorb: would exceed capacity of " + setVal.Type().String())
+		}
+		elemTyp = setVal.Type().Elem()
+	case reflect.Slice:
+		elemTyp = setVal.Type().Elem()
+		// Replace setVal with a new slice with reserved capacity.
+		setVal.Set(reflect.MakeSlice(setVal.Type(), 0, count))
+	case reflect.Chan:
+		elemTyp = setVal.Type().Elem()
+	default:
+		if count > 1 {
+			panic("Too many items for scalar type " + setVal.Type().String())
+		}
+		elemTyp = setVal.Type()
+	}
+
+	// Now reset the absorber so it can start absorbing values.
+	a.idx = 0
+	a.builder = getBuilder(elemTyp, tag, keys)
 }
 
 func (a *absorberImpl) Absorb(values ...interface{}) {
-	elem := a.elemAbsorber.element(values)
-	a.accept(elem)
+	elem := a.builder.element(values)
+	accept(a.setVal, elem, a.idx)
+	a.idx++
 }
 
-func (a *absorberImpl) accept(elem reflect.Value) {
-	// Actually append the absorbed value to the output.
-	// TODO: Support all the crazy stuff. This only works with map & struct pointers.
-	reflect.ValueOf(a.dst).Elem().Set(elem)
+func accept(into, elem reflect.Value, idx int) {
+	// Append an element to an output value.
+	switch into.Kind() {
+	case reflect.Chan:
+		into.Send(elem)
+	case reflect.Slice:
+		sl := reflect.Append(into, elem)
+		into.Set(sl)
+	case reflect.Array:
+		into.Index(idx).Set(elem)
+	default:
+		if idx > 0 {
+			panic("cannot absorb multiple items into " + into.Type().String())
+		}
+		into.Set(elem)
+	}
 }
 
 func (a *absorberImpl) Close() {
 	// Not strictly necessary, but the Open/Close pattern is clear and useful.
-	a.elemAbsorber = nil
+	a.builder = nil
 }
