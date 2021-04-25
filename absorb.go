@@ -4,8 +4,6 @@ import (
 	"reflect"
 )
 
-type Values []interface{}
-
 // Absorbable defines the interface for types that may fill Absorbers with values.
 type Absorbable interface {
 	// Emit places the entire contents of the receiver into the provided Absorber.
@@ -23,12 +21,12 @@ type Absorber interface {
 	// Returns the maximum number of times Absorb may be called, which is always greater than zero.
 	// For channel and slice types, returns INT_MAX. For struct and map pointers, returns 1.
 	// For array pointers, a fixed number is returned; Absorb panics if an array overflows.
-	Open(keys []string, tag string, count int) int
+	Open(tag string, count int, keys ...string) int
 	// Absorb creates an output element from the given values and adds it to the output.
 	//
 	// If the output type is a channel, this method may block.
 	// If the output type is array (not slice), panics on overflow.
-	Absorb(values []interface{})
+	Absorb(values ...interface{})
 	// Close releases internal resources and assigns the output when relevant.
 	Close()
 }
@@ -49,7 +47,7 @@ type absorberImpl struct {
 	elemAbsorber *absorber
 }
 
-func (a *absorberImpl) Open(keys []string, tag string, count int) int {
+func (a *absorberImpl) Open(tag string, count int, keys ...string) int {
 	dstTyp := reflect.TypeOf(a.dst)
 	elemTyp := elementType(dstTyp)
 	a.elemAbsorber = getAbsorber(elemTyp, tag, keys)
@@ -58,7 +56,7 @@ func (a *absorberImpl) Open(keys []string, tag string, count int) int {
 	return count
 }
 
-func (a *absorberImpl) Absorb(values []interface{}) {
+func (a *absorberImpl) Absorb(values ...interface{}) {
 	elem := a.elemAbsorber.element(values)
 	a.accept(elem)
 }

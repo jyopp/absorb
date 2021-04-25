@@ -1,20 +1,22 @@
-package absorb
+package absorb_test
 
 import (
 	"testing"
+
+	"github.com/jyopp/absorb"
 )
 
 type testSource struct {
 	i int
 }
 
-// testSource implements Absorbable
-func (ts testSource) Emit(into Absorber) error {
-	count := into.Open([]string{"One", "Two"}, "test", ts.i)
+// testSource implements absorb.Absorbable
+func (ts testSource) Emit(into absorb.Absorber) error {
+	count := into.Open("test", ts.i, "One", "Two")
 	defer into.Close()
 
 	for i := 0; i < count; i++ {
-		into.Absorb(Values{"test", i + 1})
+		into.Absorb("test", i+1)
 	}
 	return nil
 }
@@ -28,7 +30,7 @@ func TestPointerToStruct(t *testing.T) {
 	src := testSource{i: 5}
 	var dst TestDst
 
-	if err := Absorb(&dst, src); err != nil {
+	if err := absorb.Absorb(&dst, src); err != nil {
 		t.Fatal(err)
 	}
 	t.Logf("Dst: %+v\n", dst)
@@ -41,7 +43,7 @@ func TestMap(t *testing.T) {
 	src := testSource{i: 1}
 	var dst map[string]interface{}
 
-	if err := Absorb(&dst, src); err != nil {
+	if err := absorb.Absorb(&dst, src); err != nil {
 		t.Fatal(err)
 	}
 	t.Logf("Dst: %+v\n", dst)
