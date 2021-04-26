@@ -68,7 +68,10 @@ func newBuilder(elemTyp reflect.Type, tag string, keys []string) *elementBuilder
 }
 
 // element returns a new element of a's Elem type, constructed from the given values.
-func (a *elementBuilder) element(values []interface{}, wantPtr bool) reflect.Value {
+//
+// NOTE: For both efficiency and correctness, the returned value is of type
+// reflect.PointerTo(a.Type) when possible.
+func (a *elementBuilder) element(values []interface{}) reflect.Value {
 	switch a.Type.Kind() {
 	case reflect.Map:
 		// Use the field names directly
@@ -85,7 +88,8 @@ func (a *elementBuilder) element(values []interface{}, wantPtr bool) reflect.Val
 		}
 		return dstVal
 	case reflect.Struct:
-		dstVal := reflect.Indirect(reflect.New(a.Type))
+		ptrVal := reflect.New(a.Type)
+		dstVal := reflect.Indirect(ptrVal)
 		for idx, field := range a.Fields {
 			val := reflect.ValueOf(values[idx])
 			if val.IsValid() {
@@ -93,19 +97,19 @@ func (a *elementBuilder) element(values []interface{}, wantPtr bool) reflect.Val
 				_assign(f, val)
 			}
 		}
-		return dstVal
+		return ptrVal
 	default:
 		switch len(values) {
 		case 0:
 			return reflect.Value{}
 		case 1:
 			val := reflect.ValueOf(values[0])
-			// Special case, allow passing a type-matched pointer back out directly
-			if wantPtr && val.Type() == reflect.PtrTo(a.Type) {
+			// If val is already a pointer to an element, return it.
+			if val.Type() == reflect.PtrTo(a.Type) {
 				return val
 			}
-			dstVal := reflect.Indirect(reflect.New(a.Type))
-			_assign(dstVal, val)
+			dstVal := reflect.New(a.Type)
+			_assign(reflect.Indirect(dstVal), val)
 			return dstVal
 		default:
 			panic("cannot assign multiple values to element of type " + a.Type.String())

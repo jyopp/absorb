@@ -87,7 +87,7 @@ type absorberImpl struct {
 	idx     int
 	setVal  reflect.Value
 	builder *elementBuilder
-	wantPtr bool
+	unwrap  bool
 }
 
 func (a *absorberImpl) Open(tag string, count int, keys ...string) {
@@ -99,7 +99,6 @@ func (a *absorberImpl) Open(tag string, count int, keys ...string) {
 	case reflect.Ptr:
 		// Tell element builder to return a pointer IFF types match.
 		elemTyp = setVal.Type().Elem()
-		a.wantPtr = true
 	case reflect.Array:
 		if count > setVal.Type().Len() {
 			panic("cannot absorb: would exceed capacity of " + setVal.Type().String())
@@ -125,10 +124,14 @@ func (a *absorberImpl) Open(tag string, count int, keys ...string) {
 	// Now reset the absorber so it can start absorbing values.
 	a.idx = 0
 	a.builder = getBuilder(elemTyp, tag, keys)
+	a.unwrap = (elemTyp.Kind() != reflect.Ptr) && (setVal.Kind() != reflect.Ptr)
 }
 
 func (a *absorberImpl) Absorb(values ...interface{}) {
-	elem := a.builder.element(values, a.wantPtr)
+	elem := a.builder.element(values)
+	if a.unwrap {
+		elem = reflect.Indirect(elem)
+	}
 	accept(a.setVal, elem, a.idx)
 	a.idx++
 }
@@ -139,8 +142,7 @@ func accept(into, elem reflect.Value, idx int) {
 	case reflect.Chan:
 		into.Send(elem)
 	case reflect.Slice:
-		sl := reflect.Append(into, elem)
-		into.Set(sl)
+		into.Set(reflect.Append(into, elem))
 	case reflect.Array:
 		into.Index(idx).Set(elem)
 	case reflect.Ptr:
