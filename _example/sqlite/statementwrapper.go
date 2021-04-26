@@ -21,7 +21,7 @@ func (s *StatementWrapper) colInterface(colNum int) interface{} {
 	case sqlite.SQLITE_BLOB:
 		l := s.ColumnLen(colNum)
 		if l > 0 {
-			blob := make([]byte, 0, l)
+			blob := make([]byte, l)
 			if l == s.ColumnBytes(colNum, blob) {
 				return blob
 			}

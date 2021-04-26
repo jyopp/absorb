@@ -17,7 +17,7 @@ func main() {
 
 	// Create a test table and insert some values.
 	err = sqlitex.ExecScript(conn, `
-	CREATE TABLE Test(id INTEGER PRIMARY KEY, value TEXT);
+	CREATE TABLE Test(id INTEGER PRIMARY KEY, value TEXT, optblob BLOB);
 	-- Use a recursive expression to insert a set of junk rows
 	WITH rows(id,value) AS (
 		SELECT 1, 'row 1'
@@ -25,15 +25,18 @@ func main() {
 		SELECT id+1, 'row '||(id+1) FROM rows
 		LIMIT 25
 	)
-	INSERT INTO Test SELECT id,value FROM rows;
+	INSERT INTO Test SELECT id, value,
+	  CASE WHEN id % 2 THEN NULL ELSE x'DEC0DE' END "optblob" 
+	  FROM rows;
 	`)
 	if err != nil {
 		panic(err)
 	}
 
 	type TestStruct struct {
-		ID    int64  `sqlite:"id"`
-		Label string `sqlite:"value"`
+		ID    int     `sqlite:"id"`
+		Label string  `sqlite:"value"`
+		Blob  *[]byte `sqlite:"optblob"`
 	}
 
 	// Declare
@@ -50,7 +53,7 @@ func main() {
 	}("SELECT * FROM Test")
 
 	for row := range ch {
-		fmt.Printf("<-%T%+v\n", row, row)
+		fmt.Printf("<-%T%+v: %x\n", row, row, row.Blob)
 	}
 	fmt.Println("Done")
 }

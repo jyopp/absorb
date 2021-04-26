@@ -87,6 +87,7 @@ type absorberImpl struct {
 	idx     int
 	setVal  reflect.Value
 	builder *elementBuilder
+	wantPtr bool
 }
 
 func (a *absorberImpl) Open(tag string, count int, keys ...string) {
@@ -95,6 +96,10 @@ func (a *absorberImpl) Open(tag string, count int, keys ...string) {
 	// Examine setVal to get element type and, when appropriate, allocate a container.
 	var elemTyp reflect.Type
 	switch setVal.Kind() {
+	case reflect.Ptr:
+		// Tell element builder to return a pointer IFF types match.
+		elemTyp = setVal.Type().Elem()
+		a.wantPtr = true
 	case reflect.Array:
 		if count > setVal.Type().Len() {
 			panic("cannot absorb: would exceed capacity of " + setVal.Type().String())
@@ -123,7 +128,7 @@ func (a *absorberImpl) Open(tag string, count int, keys ...string) {
 }
 
 func (a *absorberImpl) Absorb(values ...interface{}) {
-	elem := a.builder.element(values)
+	elem := a.builder.element(values, a.wantPtr)
 	accept(a.setVal, elem, a.idx)
 	a.idx++
 }
@@ -138,6 +143,19 @@ func accept(into, elem reflect.Value, idx int) {
 		into.Set(sl)
 	case reflect.Array:
 		into.Index(idx).Set(elem)
+	case reflect.Ptr:
+		if idx > 0 {
+			panic("cannot absorb multiple items into " + into.Type().String())
+		}
+		if elem.Kind() == reflect.Ptr {
+			// Set the pointer directly, panic on type mismatch
+			into.Set(elem)
+		} else {
+			// Store value in a new pointer
+			into.Set(reflect.New(into.Type().Elem()))
+			into = reflect.Indirect(into)
+			into.Set(elem)
+		}
 	default:
 		if idx > 0 {
 			panic("cannot absorb multiple items into " + into.Type().String())

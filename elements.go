@@ -68,33 +68,84 @@ func newBuilder(elemTyp reflect.Type, tag string, keys []string) *elementBuilder
 }
 
 // element returns a new element of a's Elem type, constructed from the given values.
-func (a *elementBuilder) element(values []interface{}) reflect.Value {
-	// Allocate a value for assignment
-	dstVal := reflect.Indirect(reflect.New(a.Type))
-
+func (a *elementBuilder) element(values []interface{}, wantPtr bool) reflect.Value {
 	switch a.Type.Kind() {
 	case reflect.Map:
 		// Use the field names directly
-		dstVal = reflect.MakeMapWithSize(a.Type, len(values))
-		for srcIdx := range values {
-			key := reflect.ValueOf(a.Keys[srcIdx])
-			val := reflect.ValueOf(values[srcIdx])
-			dstVal.SetMapIndex(key, val)
+		dstVal := reflect.MakeMapWithSize(a.Type, len(values))
+		// Values are homogeneous, so just reuse one Value
+		mapVal := reflect.Indirect(reflect.New(dstVal.Type().Elem()))
+		for idx, value := range values {
+			key := reflect.ValueOf(a.Keys[idx])
+			val := reflect.ValueOf(value)
+			if val.IsValid() {
+				_assign(mapVal, val)
+				dstVal.SetMapIndex(key, mapVal)
+			}
 		}
+		return dstVal
 	case reflect.Struct:
+		dstVal := reflect.Indirect(reflect.New(a.Type))
 		for idx, field := range a.Fields {
 			val := reflect.ValueOf(values[idx])
-			dstVal.FieldByIndex(field.Index).Set(val)
+			if val.IsValid() {
+				f := dstVal.FieldByIndex(field.Index)
+				_assign(f, val)
+			}
 		}
+		return dstVal
 	default:
-		// Expect this to crash often, until we better understand the desired behavior.
-		dstVal.Set(reflect.ValueOf(values[0]))
+		switch len(values) {
+		case 0:
+			return reflect.Value{}
+		case 1:
+			val := reflect.ValueOf(values[0])
+			// Special case, allow passing a type-matched pointer back out directly
+			if wantPtr && val.Type() == reflect.PtrTo(a.Type) {
+				return val
+			}
+			dstVal := reflect.Indirect(reflect.New(a.Type))
+			_assign(dstVal, val)
+			return dstVal
+		default:
+			panic("cannot assign multiple values to element of type " + a.Type.String())
+		}
+	}
+}
+
+func _assign(dst, src reflect.Value) {
+	dstType, srcType := dst.Type(), src.Type()
+
+	if dstType == srcType || srcType.AssignableTo(dstType) {
+		// Happy Path
+		dst.Set(src)
+		return
 	}
 
-	return dstVal
+	// If one or both values is a pointer, the unwrapped types may be assignable or convertible.
+	if srcType.Kind() == reflect.Ptr {
+		// Reassign src to its contained value.
+		srcType = srcType.Elem()
+		src = reflect.Indirect(src)
+		// If our unwrapped types match up, assign and return
+		if srcType.AssignableTo(dstType) {
+			dst.Set(src)
+			return
+		}
+	}
+	// For struct and map fields (top-level values handled elsewhere)
+	// Handle concrete-to-pointer and pointer-to-pointer conversions
+	if dstType.Kind() == reflect.Ptr {
+		// Allocate a value and unwrap it for assignment
+		dstType = dstType.Elem()
+		dst.Set(reflect.New(dstType))
+		dst = reflect.Indirect(dst)
+		if srcType.AssignableTo(dstType) {
+			dst.Set(src)
+			return
+		}
+	}
 
-	// container := reflect.ValueOf(dst)
-	// for container.Type().Elem() != dstVal.Type() {
-	// 	container = container.Elem()
-	// }
+	// Convert without checking convertability; We want panic on failure.
+	dst.Set(src.Convert(dstType))
 }
