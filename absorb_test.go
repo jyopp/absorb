@@ -280,127 +280,67 @@ func TestArray(t *testing.T) {
 	}
 }
 
-func TestUnassignablePanic(t *testing.T) {
-	defer func() {
-		if r := recover(); r == nil {
-			t.Fatalf("Failed to panic for unassignable destination")
-		}
-	}()
+// Require fn to panic in a subtest named "name"
+func subpanic(t *testing.T, name string, fn func()) {
+	t.Run(name, func(t *testing.T) {
+		defer func() {
+			if r := recover(); r == nil {
+				t.Fatalf("Failed to panic for %s", name)
+			}
+		}()
 
-	var dst int
-
-	// Should panic if configured with a non-assignable type
-	_ = absorb.New(dst)
+		fn()
+	})
 }
 
-func TestOvercountPanic(t *testing.T) {
-	defer func() {
-		if r := recover(); r == nil {
-			t.Fatalf("Failed to panic for out-of-bounds absorption")
-		}
-	}()
+func TestPanics(t *testing.T) {
+	subpanic(t, "Unassignable", func() {
+		var dst int
+		absorb.New(dst)
+	})
+	subpanic(t, "Overcount", func() {
+		var dst int
+		absorb.New(&dst).Open("", 2)
+	})
+	subpanic(t, "Array Overcount", func() {
+		var dst [5]int
+		absorb.New(&dst).Open("", 7)
+	})
+	subpanic(t, "Overflow", func() {
+		var dst int
+		abs := absorb.New(&dst)
+		abs.Open("", 1)
+		abs.Absorb(1)
+		abs.Absorb(2)
+	})
+	subpanic(t, "Multivalue", func() {
+		var dst int
+		abs := absorb.New(&dst)
+		abs.Open("", 1)
+		abs.Absorb(1, 3)
+	})
+	subpanic(t, "Empty Row", func() {
+		var dst int
 
-	var dst int
+		abs := absorb.New(&dst)
+		abs.Open("", 1)
+		defer abs.Close()
+		abs.Absorb()
+	})
+	subpanic(t, "Pointer Overflow", func() {
+		var dst *int
 
-	abs := absorb.New(&dst)
-	// Open should panic if dst can't hold the expected count.
-	abs.Open("", 2)
-}
+		abs := absorb.New(&dst)
+		abs.Open("", 1)
+		defer abs.Close()
+		abs.Absorb(1)
+		abs.Absorb(2)
+	})
+	subpanic(t, "Receive-Only Channel", func() {
+		sendRcv := make(chan TestDst)
+		var rcvOnly <-chan TestDst = sendRcv
 
-func TestArrayOvercountPanic(t *testing.T) {
-	defer func() {
-		if r := recover(); r == nil {
-			t.Fatalf("Failed to panic for out-of-bounds absorption")
-		}
-	}()
-
-	var dst [5]int
-
-	abs := absorb.New(&dst)
-	// Open should panic if dst can't hold the expected count.
-	abs.Open("", 7)
-}
-
-func TestOverflowPanic(t *testing.T) {
-	defer func() {
-		if r := recover(); r == nil {
-			t.Fatalf("Failed to panic for multiple writes to single pointer")
-		}
-	}()
-
-	var dst int
-
-	abs := absorb.New(&dst)
-	abs.Open("", 1)
-	defer abs.Close()
-
-	abs.Absorb(1)
-	// Absorb should panic if a second item is written.
-	abs.Absorb(2)
-}
-
-func TestPointerMultivaluePanic(t *testing.T) {
-	defer func() {
-		if r := recover(); r == nil {
-			t.Fatalf("Failed to panic for multi-valued write to single pointer")
-		}
-	}()
-
-	var dst int
-
-	abs := absorb.New(&dst)
-	abs.Open("", 1)
-	defer abs.Close()
-
-	// Absorb must panic if trying to put two values into a single pointer.
-	abs.Absorb(1, 3)
-}
-
-func TestEmptyRowPanic(t *testing.T) {
-	defer func() {
-		if r := recover(); r == nil {
-			t.Fatalf("Failed to panic for zero-valued write to single pointer")
-		}
-	}()
-
-	var dst int
-
-	abs := absorb.New(&dst)
-	abs.Open("", 1)
-	defer abs.Close()
-
-	// Absorb must panic if trying to put two values into a single pointer.
-	abs.Absorb()
-}
-
-func TestPointerOverflowPanic(t *testing.T) {
-	defer func() {
-		if r := recover(); r == nil {
-			t.Fatalf("Failed to panic for multiple writes to single pointer")
-		}
-	}()
-
-	var dst *int
-
-	abs := absorb.New(&dst)
-	abs.Open("", 1)
-	defer abs.Close()
-
-	abs.Absorb(1)
-	// Absorb should panic if a second item is written.
-	abs.Absorb(2)
-}
-
-func TestReceiveOnlyPanic(t *testing.T) {
-	defer func() {
-		if r := recover(); r == nil {
-			t.Fatalf("Failed to panic for receive-only channel")
-		}
-	}()
-
-	sendRcv := make(chan TestDst)
-	var rcvOnly <-chan TestDst = sendRcv
-
-	// absorb.New should panic if channel cannot be written to.
-	_ = absorb.New(rcvOnly)
+		// absorb.New should panic if channel cannot be written to.
+		_ = absorb.New(rcvOnly)
+	})
 }
