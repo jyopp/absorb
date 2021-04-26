@@ -106,6 +106,10 @@ func (a *absorberImpl) Open(tag string, count int, keys ...string) {
 			panic("cannot absorb: would exceed capacity of " + setVal.Type().String())
 		}
 		elemTyp = setVal.Type().Elem()
+		if elemTyp.Kind() == reflect.Ptr {
+			elemTyp = elemTyp.Elem()
+			noUnwrap = true
+		}
 	case reflect.Slice:
 		elemTyp = setVal.Type().Elem()
 		// Replace setVal with a new slice with reserved capacity.
@@ -114,6 +118,10 @@ func (a *absorberImpl) Open(tag string, count int, keys ...string) {
 			cap = 25
 		}
 		setVal.Set(reflect.MakeSlice(setVal.Type(), 0, cap))
+		if elemTyp.Kind() == reflect.Ptr {
+			elemTyp = elemTyp.Elem()
+			noUnwrap = true
+		}
 	case reflect.Chan:
 		elemTyp = setVal.Type().Elem()
 		// If this is a channel of pointers-to-stuff, mark it appropriately.

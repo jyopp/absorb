@@ -59,7 +59,7 @@ func BenchmarkManualStructs(b *testing.B) {
 		conn := pool.Get(context.TODO())
 		defer pool.Put(conn)
 
-		output := []BenchRow{}
+		output := []*BenchRow{}
 
 		// Hand-tuned to be as fast as possible for a fair comparison.
 		// In testing, looking up from names seems faster than using column indexes.
@@ -67,7 +67,7 @@ func BenchmarkManualStructs(b *testing.B) {
 		// and around 1k rows becomes slower than the Absorb methods.
 		for testIdx := b.N; pb.Next(); testIdx++ {
 			sqlitex.Exec(conn, "SELECT * FROM Test", func(stmt *sqlite.Stmt) error {
-				output = append(output, BenchRow{
+				output = append(output, &BenchRow{
 					ID:    stmt.GetInt64("id"),
 					Label: stmt.GetText("value"),
 				})
@@ -89,7 +89,7 @@ func BenchmarkSliceAbsorption(b *testing.B) {
 				Stmt: conn.Prep("SELECT * FROM Test"),
 			}
 
-			absorb.Absorb(&[]BenchRow{}, &wrapped)
+			absorb.Absorb(&[]*BenchRow{}, &wrapped)
 		}
 	})
 }
@@ -102,7 +102,8 @@ func BenchmarkChannelAbsorption(b *testing.B) {
 		defer pool.Put(conn)
 
 		for testIdx := b.N; pb.Next(); testIdx++ {
-			ch := make(chan BenchRow, 25)
+			// Consume pointers to the structs
+			ch := make(chan *BenchRow, 25)
 			go func() {
 				wrapped := StatementWrapper{
 					Stmt: conn.Prep("SELECT * FROM Test"),
