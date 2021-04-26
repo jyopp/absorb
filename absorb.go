@@ -95,10 +95,12 @@ func (a *absorberImpl) Open(tag string, count int, keys ...string) {
 
 	// Examine setVal to get element type and, when appropriate, allocate a container.
 	var elemTyp reflect.Type
+	var noUnwrap bool
 	switch setVal.Kind() {
 	case reflect.Ptr:
 		// Tell element builder to return a pointer IFF types match.
 		elemTyp = setVal.Type().Elem()
+		noUnwrap = true
 	case reflect.Array:
 		if count > setVal.Type().Len() {
 			panic("cannot absorb: would exceed capacity of " + setVal.Type().String())
@@ -114,6 +116,11 @@ func (a *absorberImpl) Open(tag string, count int, keys ...string) {
 		setVal.Set(reflect.MakeSlice(setVal.Type(), 0, cap))
 	case reflect.Chan:
 		elemTyp = setVal.Type().Elem()
+		// If this is a channel of pointers-to-stuff, mark it appropriately.
+		if elemTyp.Kind() == reflect.Ptr {
+			elemTyp = elemTyp.Elem()
+			noUnwrap = true
+		}
 	default:
 		if count > 1 {
 			panic("Too many items for scalar type " + setVal.Type().String())
@@ -124,7 +131,7 @@ func (a *absorberImpl) Open(tag string, count int, keys ...string) {
 	// Now reset the absorber so it can start absorbing values.
 	a.idx = 0
 	a.builder = getBuilder(elemTyp, tag, keys)
-	a.unwrap = (elemTyp.Kind() != reflect.Ptr) && (setVal.Kind() != reflect.Ptr)
+	a.unwrap = (elemTyp.Kind() != reflect.Ptr) && !noUnwrap
 }
 
 func (a *absorberImpl) Absorb(values ...interface{}) {
