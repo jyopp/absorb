@@ -85,11 +85,8 @@ func BenchmarkSliceAbsorption(b *testing.B) {
 		defer pool.Put(conn)
 
 		for testIdx := b.N; pb.Next(); testIdx++ {
-			wrapped := StatementWrapper{
-				Stmt: conn.Prep("SELECT * FROM Test"),
-			}
-
-			absorb.Absorb(&[]*BenchRow{}, &wrapped)
+			stmt := conn.Prep("SELECT * FROM Test")
+			absorb.Absorb(&[]*BenchRow{}, CastAbsorbable(stmt))
 		}
 	})
 }
@@ -105,10 +102,8 @@ func BenchmarkChannelAbsorption(b *testing.B) {
 			// Consume pointers to the structs
 			ch := make(chan *BenchRow, 25)
 			go func() {
-				wrapped := StatementWrapper{
-					Stmt: conn.Prep("SELECT * FROM Test"),
-				}
-				absorb.Absorb(ch, &wrapped)
+				stmt := conn.Prep("SELECT * FROM Test")
+				absorb.Absorb(ch, CastAbsorbable(stmt))
 				close(ch)
 			}()
 			// Drain the channel

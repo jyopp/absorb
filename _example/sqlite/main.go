@@ -45,10 +45,8 @@ func main() {
 	go func(sql string) {
 		// Read from the DB and send each row to the channel.
 		// Rows are automatically marshaled into structs as they are absorbed.
-		stmt := StatementWrapper{
-			Stmt: conn.Prep(sql),
-		}
-		absorb.Absorb(ch, &stmt)
+		stmt := CastAbsorbable(conn.Prep(sql))
+		absorb.Absorb(ch, stmt)
 		close(ch)
 	}("SELECT * FROM Test")
 
