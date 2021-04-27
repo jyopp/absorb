@@ -18,6 +18,8 @@ type Absorber interface {
 	// Count is a hint about the number of items this Absorber can produce. If the number
 	// of items is unknown, pass -1.
 	//
+	// If no keys are provided, Absorb may be called at most once, with a single value.
+	//
 	// Panics if count is greater than the absorber's maximum size.
 	Open(tag string, count int, keys ...string)
 	// Absorb creates an output element from the given values and adds it to the output.
@@ -91,55 +93,42 @@ type absorberImpl struct {
 }
 
 func (a *absorberImpl) Open(tag string, count int, keys ...string) {
-	setVal := a.setVal
-
-	// Examine setVal to get element type and, when appropriate, allocate a container.
-	var elemTyp reflect.Type
-	var noUnwrap bool
-	switch setVal.Kind() {
-	case reflect.Ptr:
-		// Tell element builder to return a pointer IFF types match.
-		elemTyp = setVal.Type().Elem()
-		noUnwrap = true
+	// Examine setVal to get element type and descend into its type structure as needed.
+	elemTyp := a.setVal.Type()
+	switch elemTyp.Kind() {
 	case reflect.Array:
-		if count > setVal.Type().Len() {
-			panic("cannot absorb: would exceed capacity of " + setVal.Type().String())
+		if count > elemTyp.Len() {
+			panic("cannot absorb: would exceed capacity of " + elemTyp.String())
 		}
-		elemTyp = setVal.Type().Elem()
-		if elemTyp.Kind() == reflect.Ptr {
+		// one key => array of single values; no keys => single value of type array
+		if len(keys) > 0 {
 			elemTyp = elemTyp.Elem()
-			noUnwrap = true
 		}
 	case reflect.Slice:
-		elemTyp = setVal.Type().Elem()
-		// Replace setVal with a new slice with reserved capacity.
-		cap := count
-		if cap < 0 {
-			cap = 25
-		}
-		setVal.Set(reflect.MakeSlice(setVal.Type(), 0, cap))
-		if elemTyp.Kind() == reflect.Ptr {
+		// one key => slice of values; no keys => single value of type slice
+		if len(keys) > 0 {
 			elemTyp = elemTyp.Elem()
-			noUnwrap = true
 		}
 	case reflect.Chan:
-		elemTyp = setVal.Type().Elem()
-		// If this is a channel of pointers-to-stuff, mark it appropriately.
-		if elemTyp.Kind() == reflect.Ptr {
-			elemTyp = elemTyp.Elem()
-			noUnwrap = true
-		}
+		elemTyp = elemTyp.Elem()
 	default:
 		if count > 1 {
-			panic("Too many items for scalar type " + setVal.Type().String())
+			panic("cannot absorb multiple values into single-valued type " + elemTyp.String())
 		}
-		elemTyp = setVal.Type()
 	}
 
-	// Now reset the absorber so it can start absorbing values.
+	// Reset the index; An absorber could be re-used.
 	a.idx = 0
+
+	if elemTyp.Kind() == reflect.Ptr {
+		// If we ended on a pointer type, dereference it one more time
+		elemTyp = elemTyp.Elem()
+		a.unwrap = false
+	} else {
+		// Else indicate that we DON'T have a pointer, so elements may need to be unwrapped before accepting them
+		a.unwrap = true
+	}
 	a.builder = getBuilder(elemTyp, tag, keys)
-	a.unwrap = (elemTyp.Kind() != reflect.Ptr) && !noUnwrap
 }
 
 func (a *absorberImpl) Absorb(values ...interface{}) {
@@ -147,8 +136,12 @@ func (a *absorberImpl) Absorb(values ...interface{}) {
 	if a.unwrap {
 		elem = reflect.Indirect(elem)
 	}
-	accept(a.setVal, elem, a.idx)
-	a.idx++
+	idx := a.idx
+	if idx > 0 && len(a.builder.Keys) == 0 {
+		panic("cannot accept multiple items when no keys were provided")
+	}
+	accept(a.setVal, elem, idx)
+	a.idx = idx + 1
 }
 
 func accept(into, elem reflect.Value, idx int) {
@@ -157,13 +150,15 @@ func accept(into, elem reflect.Value, idx int) {
 	case reflect.Chan:
 		into.Send(elem)
 	case reflect.Slice:
-		into.Set(reflect.Append(into, elem))
+		if into.Type() == elem.Type() {
+			// Necessary to support &[]byte
+			into.Set(elem)
+		} else {
+			into.Set(reflect.Append(into, elem))
+		}
 	case reflect.Array:
 		into.Index(idx).Set(elem)
 	case reflect.Ptr:
-		if idx > 0 {
-			panic("cannot absorb multiple items into " + into.Type().String())
-		}
 		if elem.Kind() == reflect.Ptr {
 			// Set the pointer directly, panic on type mismatch
 			into.Set(elem)
@@ -174,9 +169,6 @@ func accept(into, elem reflect.Value, idx int) {
 			into.Set(elem)
 		}
 	default:
-		if idx > 0 {
-			panic("cannot absorb multiple items into " + into.Type().String())
-		}
 		into.Set(elem)
 	}
 }

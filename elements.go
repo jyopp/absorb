@@ -104,8 +104,7 @@ func (a *elementBuilder) element(values []interface{}) reflect.Value {
 			return reflect.Value{}
 		case 1:
 			val := reflect.ValueOf(values[0])
-			// If val is already a pointer to an element, return it.
-			if val.Type() == reflect.PtrTo(a.Type) {
+			if t := val.Type(); t == a.Type || t == reflect.PtrTo(a.Type) {
 				return val
 			}
 			dstVal := reflect.New(a.Type)
@@ -131,11 +130,6 @@ func _assign(dst, src reflect.Value) {
 		// Reassign src to its contained value.
 		srcType = srcType.Elem()
 		src = reflect.Indirect(src)
-		// If our unwrapped types match up, assign and return
-		if srcType.AssignableTo(dstType) {
-			dst.Set(src)
-			return
-		}
 	}
 	// For struct and map fields (top-level values handled elsewhere)
 	// Handle concrete-to-pointer and pointer-to-pointer conversions

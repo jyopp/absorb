@@ -1,6 +1,7 @@
 package absorb_test
 
 import (
+	"bytes"
 	"reflect"
 	"testing"
 
@@ -252,7 +253,8 @@ func TestSlice(t *testing.T) {
 	var dst []int
 
 	abs := absorb.New(&dst)
-	abs.Open("", 4)
+	// To distinguish row-per-int from one-slice-of-ints, must pass a key
+	abs.Open("", 4, "int")
 	defer abs.Close()
 
 	expect := []int{34, 55, 22, 1}
@@ -268,7 +270,8 @@ func TestArray(t *testing.T) {
 	var dst [4]int
 
 	abs := absorb.New(&dst)
-	abs.Open("", 4)
+	// To distinguish row-per-int from one-slice-of-ints, pass a key
+	abs.Open("", 4, "int")
 	defer abs.Close()
 
 	expect := []int{34, 55, 22, 1}
@@ -276,6 +279,20 @@ func TestArray(t *testing.T) {
 		abs.Absorb(i)
 	}
 	if !reflect.DeepEqual(dst[:], expect) {
+		t.Fatal("Expected", expect, "but got", dst)
+	}
+}
+
+func TestBytes(t *testing.T) {
+	var dst []byte
+
+	abs := absorb.New(&dst)
+	abs.Open("", 1)
+	defer abs.Close()
+
+	expect := []byte{34, 55, 22, 1}
+	abs.Absorb(expect)
+	if !bytes.Equal(dst, expect) {
 		t.Fatal("Expected", expect, "but got", dst)
 	}
 }
@@ -326,6 +343,19 @@ func TestPanics(t *testing.T) {
 		abs.Open("", 1)
 		defer abs.Close()
 		abs.Absorb()
+	})
+	subpanic(t, "Bytes Ovewrite", func() {
+		var dst []byte
+
+		abs := absorb.New(&dst)
+		abs.Open("", 1)
+		defer abs.Close()
+
+		expect := []byte{34, 55, 22, 1}
+		abs.Absorb(expect)
+		// *Because* there are no keys, multi-accept must panic even
+		// though the underlying type is technically a slice.
+		abs.Absorb(expect)
 	})
 	subpanic(t, "Pointer Overflow", func() {
 		var dst *int
