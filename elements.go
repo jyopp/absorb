@@ -43,22 +43,33 @@ func newBuilder(elemTyp reflect.Type, tag string, keys []string) *elementBuilder
 	}
 
 	if elemTyp.Kind() == reflect.Struct {
-		tagFields := make(map[string]reflect.StructField)
-		if tag != "" {
-			for i := 0; i < elemTyp.NumField(); i++ {
-				field := elemTyp.Field(i)
-				if tagVal := field.Tag.Get(tag); tagVal != "" {
-					tagFields[tagVal] = field
+		mappedFields := make(map[string]reflect.StructField)
+		for i := 0; i < elemTyp.NumField(); i++ {
+			field := elemTyp.Field(i)
+			if tagVal, ok := field.Tag.Lookup(tag); ok {
+				// If a field has a matching struct tag, ONLY the tag is used.
+				// If the tag is explicitly empty, the field is excluded.
+				if tagVal != "" {
+					mappedFields[tagVal] = field
+				}
+			} else {
+				// Use the field's name and its lowercased name for matching.
+				mappedFields[field.Name] = field
+				lowered := strings.ToLower(field.Name)
+				// Lowercased names are set conditionally, to avoid clobbering tags & other fields
+				if _, ok := mappedFields[lowered]; !ok {
+					mappedFields[lowered] = field
 				}
 			}
 		}
 
 		fields := make([]reflect.StructField, len(keys))
 		for idx, key := range keys {
-			if tagged, ok := tagFields[key]; ok {
-				fields[idx] = tagged
-			} else if field, ok := a.Type.FieldByName(key); ok {
+			if field, ok := mappedFields[key]; ok {
 				fields[idx] = field
+			} else {
+				// Fall back to case-insensitive match
+				fields[idx] = mappedFields[strings.ToLower(key)]
 			}
 		}
 		a.Fields = fields
