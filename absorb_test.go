@@ -28,6 +28,7 @@ func (ts testSource) Emit(into absorb.Absorber) error {
 type TestDst struct {
 	Name   string
 	Actual int `test:"Aliased"`
+	Unused int
 }
 
 func TestStructPointer(t *testing.T) {
@@ -79,6 +80,19 @@ func TestStructChannel(t *testing.T) {
 		if received != expect {
 			t.Fatalf("Expected %+v, got %+v", expect, received)
 		}
+	}
+}
+
+func TestPointerToStruct(t *testing.T) {
+	src := testSource{i: 1}
+	var dst *TestDst
+
+	if err := absorb.Absorb(&dst, src); err != nil {
+		t.Fatal(err)
+	}
+	expect := TestDst{Name: "test", Actual: 1}
+	if *dst != expect {
+		t.Fatalf("Expected %+v, got %+v", expect, dst)
 	}
 }
 

@@ -59,7 +59,8 @@ func BenchmarkManualStructs(b *testing.B) {
 		conn := pool.Get(context.TODO())
 		defer pool.Put(conn)
 
-		output := []*BenchRow{}
+		// Steelman this case; Number of rows is known in advance and can be optimized.
+		output := make([]*BenchRow, 0, 10)
 
 		// Hand-tuned to be as fast as possible for a fair comparison.
 		// In testing, looking up from names seems faster than using column indexes.
@@ -86,7 +87,7 @@ func BenchmarkSliceAbsorption(b *testing.B) {
 
 		for testIdx := b.N; pb.Next(); testIdx++ {
 			stmt := conn.Prep("SELECT * FROM Test")
-			absorb.Absorb(&[]*BenchRow{}, CastAbsorbable(stmt))
+			absorb.Absorb(&[]BenchRow{}, CastAbsorbable(stmt))
 		}
 	})
 }
@@ -99,7 +100,7 @@ func BenchmarkChannelAbsorption(b *testing.B) {
 		defer pool.Put(conn)
 
 		for testIdx := b.N; pb.Next(); testIdx++ {
-			// Consume pointers to the structs
+			// Consume pointers to the structs so they aren't copied
 			ch := make(chan *BenchRow, 25)
 			go func() {
 				stmt := conn.Prep("SELECT * FROM Test")

@@ -107,6 +107,13 @@ func (a *absorberImpl) Open(tag string, count int, keys ...string) {
 	case reflect.Slice:
 		// one key => slice of values; no keys => single value of type slice
 		if len(keys) > 0 {
+			// Ensure an array of correct dimension is allocated
+			cap := count
+			if cap < 0 {
+				cap = 16
+			}
+			a.setVal.Set(reflect.MakeSlice(elemTyp, 0, cap))
+
 			elemTyp = elemTyp.Elem()
 		}
 	case reflect.Chan:
@@ -132,45 +139,51 @@ func (a *absorberImpl) Open(tag string, count int, keys ...string) {
 }
 
 func (a *absorberImpl) Absorb(values ...interface{}) {
-	elem := a.builder.element(values)
-	if a.unwrap {
-		elem = reflect.Indirect(elem)
-	}
 	idx := a.idx
-	if idx > 0 && len(a.builder.Keys) == 0 {
-		panic("cannot accept multiple items when no keys were provided")
-	}
-	accept(a.setVal, elem, idx)
+	elem := getDst(a.setVal, a.builder.Type, idx)
+	a.builder.absorb(elem, values)
 	a.idx = idx + 1
+	// For channel types only, we need to Send the newly-created value
+	if a.setVal.Kind() == reflect.Chan {
+		if a.unwrap {
+			elem = reflect.Indirect(elem)
+		}
+		a.setVal.Send(elem)
+	}
 }
 
-func accept(into, elem reflect.Value, idx int) {
+// TODO: make this getDst(into reflect.Value, idx int) reflect.Value
+// Returned value tries to be a pointer and should be passed to Indirect.
+func getDst(into reflect.Value, eType reflect.Type, idx int) reflect.Value {
 	// Append an element to an output value.
 	switch into.Kind() {
 	case reflect.Chan:
-		into.Send(elem)
+		// Return new, writable value of channel's type
+		return reflect.New(eType)
 	case reflect.Slice:
-		if into.Type() == elem.Type() {
-			// Necessary to support &[]byte
-			into.Set(elem)
-		} else {
-			into.Set(reflect.Append(into, elem))
+		if into.Type().Elem().Kind() == reflect.Uint8 {
+			// Special Absorb(&[]byte, ...) support
+			break
 		}
+		if into.Cap() <= idx {
+			// Grow slice by appending a zero value to it
+			into.Set(reflect.Append(into, reflect.Zero(into.Type().Elem())))
+		} else if into.Len() <= idx {
+			into.SetLen(idx + 1)
+		}
+		return into.Index(idx)
 	case reflect.Array:
-		into.Index(idx).Set(elem)
+		// Arrays have fixed capacity and length, so this panics if out of range
+		return into.Index(idx)
 	case reflect.Ptr:
-		if elem.Kind() == reflect.Ptr {
-			// Set the pointer directly, panic on type mismatch
-			into.Set(elem)
-		} else {
-			// Store value in a new pointer
+		if into.IsZero() {
 			into.Set(reflect.New(into.Type().Elem()))
-			into = reflect.Indirect(into)
-			into.Set(elem)
 		}
-	default:
-		into.Set(elem)
 	}
+	if idx > 0 {
+		panic("cannot accept multiple values into single-valued " + into.Type().String())
+	}
+	return into
 }
 
 func (a *absorberImpl) Close() {
